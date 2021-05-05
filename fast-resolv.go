@@ -57,7 +57,6 @@ func init() {
 	flag.IntVar(&maxAttempts, "a", 4, "Number of failed attempts before we give up")
 	flag.StringVar(&resolveConf, "r", defaultResolvPath+"/fast-resolv.conf", "path to a resolv.conf")
 	flag.StringVar(&domainsFile, "d", "domains.txt", "path to file with domains to lookup")
-	unboundInstance.ResolvConf(resolveConf)
 }
 
 func lookupHost(domain string, attemptNumber int) (addrs []string, err error) {
@@ -235,6 +234,7 @@ func getDomains() []string {
 }
 func main() {
 	flag.Parse()
+	unboundInstance.ResolvConf(resolveConf)
 	domains := getDomains()
 
 	if len(domains) == 0 {
