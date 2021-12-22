@@ -3,18 +3,20 @@ package main
 
 import (
 	"bufio"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/kardianos/osext"
 	"github.com/miekg/dns"
 	"github.com/miekg/unbound"
+	homedir "github.com/mitchellh/go-homedir"
 )
 
 type (
@@ -39,23 +41,43 @@ var (
 	ipMatch         = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}$`)
 	ch              = make(chan Result, concurrency)
 	unboundInstance = unbound.New()
-	resolveConf     string
-	domainsFile     string
-	concurrency     int
-	lookupTimeout   time.Duration
-	maxAttempts     int
-	outputLock      sync.Mutex
+
+	//go:embed fast-resolv.conf
+	defaultConf []byte
+	resolveConf string
+
+	domainsFile   string
+	concurrency   int
+	lookupTimeout time.Duration
+	maxAttempts   int
+	outputLock    sync.Mutex
 )
 
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
 func init() {
-	defaultResolvPath, err := osext.ExecutableFolder()
+	home, err := homedir.Dir()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	confDir := filepath.Join(home, ".fast-resolv")
+	if !exists(confDir) {
+		os.MkdirAll(confDir, 0755)
+	}
+
+	defaultResolvConf := filepath.Join(confDir, "fast-resolv.conf")
+	if !exists(defaultResolvConf) {
+		os.WriteFile(defaultResolvConf, defaultConf, 0644)
+	}
+
 	flag.IntVar(&concurrency, "c", 100, "concurrent lookups")
 	flag.DurationVar(&lookupTimeout, "t", 10, "lookup timeout")
 	flag.IntVar(&maxAttempts, "a", 4, "Number of failed attempts before we give up")
-	flag.StringVar(&resolveConf, "r", defaultResolvPath+"/fast-resolv.conf", "path to a resolv.conf")
+	flag.StringVar(&resolveConf, "r", defaultResolvConf, "path to a resolv.conf")
 	flag.StringVar(&domainsFile, "d", "domains.txt", "path to file with domains to lookup")
 }
 
@@ -238,7 +260,7 @@ func main() {
 	domains := getDomains()
 
 	if len(domains) == 0 {
-		fmt.Errorf("No Domains found")
+		fmt.Println("[!] No Domains found")
 		return
 	}
 
@@ -300,8 +322,6 @@ func main() {
 	close(tasks)
 
 	wg.Wait()
-
-	return
 }
 
 // atom:set fileencoding=utf8 fileformat=unix filetype=go noexpandtab:
