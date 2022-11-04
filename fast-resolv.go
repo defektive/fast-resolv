@@ -225,13 +225,20 @@ func syncPrintf(msg string, args ...interface{}) {
 func getDomains() []string {
 	domains := []string{}
 
-	file, err := os.Open(domainsFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
+	var scanner *bufio.Scanner
 
-	scanner := bufio.NewScanner(file)
+	if domainsFile == "-" {
+		scanner = bufio.NewScanner(os.Stdin)
+	} else {
+		file, err := os.Open(domainsFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer file.Close()
+		scanner = bufio.NewScanner(file)
+	}
+
 	for scanner.Scan() {
 		domain := scanner.Text()
 		if strings.Contains(domain, "@") {
