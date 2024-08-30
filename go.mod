@@ -1,6 +1,6 @@
 module github.com/defektive/fast-resolv
 
-go 1.17
+go 1.23.0
 
 require (
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/analog-substance/util v0.1.0 // indirect
+	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	golang.org/x/mod v0.20.0 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect

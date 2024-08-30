@@ -6,18 +6,23 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"github.com/asaskevich/govalidator"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
+	ver "github.com/analog-substance/util/cli/version"
 	"github.com/miekg/dns"
 	"github.com/miekg/unbound"
+
 	homedir "github.com/mitchellh/go-homedir"
 )
+
+var version = "v0.0.0"
+var commit = "replace"
 
 type (
 	Result struct {
@@ -51,6 +56,7 @@ var (
 	lookupTimeout time.Duration
 	maxAttempts   int
 	outputLock    sync.Mutex
+	versionFlag   bool
 )
 
 func exists(path string) bool {
@@ -66,12 +72,12 @@ func init() {
 
 	confDir := filepath.Join(home, ".fast-resolv")
 	if !exists(confDir) {
-		os.MkdirAll(confDir, 0755)
+		_ = os.MkdirAll(confDir, 0755)
 	}
 
 	defaultResolvConf := filepath.Join(confDir, "fast-resolv.conf")
 	if !exists(defaultResolvConf) {
-		os.WriteFile(defaultResolvConf, defaultConf, 0644)
+		_ = os.WriteFile(defaultResolvConf, defaultConf, 0644)
 	}
 
 	flag.IntVar(&concurrency, "c", 100, "concurrent lookups")
@@ -79,6 +85,7 @@ func init() {
 	flag.IntVar(&maxAttempts, "a", 4, "Number of failed attempts before we give up")
 	flag.StringVar(&resolveConf, "r", defaultResolvConf, "path to a resolv.conf")
 	flag.StringVar(&domainsFile, "d", "domains.txt", "path to file with domains to lookup")
+	flag.BoolVar(&versionFlag, "v", false, "Display version information")
 }
 
 func lookupHost(domain string, attemptNumber int) (addrs []string, err error) {
@@ -218,7 +225,10 @@ func resolveWorker(linkChan chan string, wg *sync.WaitGroup) {
 func syncPrintf(msg string, args ...interface{}) {
 	outputLock.Lock()
 	fmt.Printf(msg, args...)
-	os.Stdout.Sync()
+	err := os.Stdout.Sync()
+	if err != nil {
+		syncPrintf("!!!!! failed: sync err=%s\n", err)
+	}
 	outputLock.Unlock()
 }
 
@@ -241,17 +251,9 @@ func getDomains() []string {
 
 	for scanner.Scan() {
 		domain := scanner.Text()
-		if strings.Contains(domain, "@") {
-			syncPrintf("SKIP %s\n", domain)
-			continue
+		if govalidator.IsDNSName(domain) {
+			domains = append(domains, domain)
 		}
-
-		if strings.Contains(domain, "%") {
-			syncPrintf("SKIP %s\n", domain)
-			continue
-		}
-
-		domains = append(domains, domain)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -263,12 +265,22 @@ func getDomains() []string {
 }
 func main() {
 	flag.Parse()
+
+	if versionFlag {
+		fmt.Printf("fast-resolv %s\n", ver.GetVersionInfo(version, commit))
+		os.Exit(0)
+	}
+
 	unboundInstance.ResolvConf(resolveConf)
 	domains := getDomains()
 
 	if len(domains) == 0 {
 		fmt.Println("[!] No Domains found")
 		return
+	}
+
+	for _, domain := range domains {
+		fmt.Println(domain)
 	}
 
 	tasks := make(chan string, concurrency)
@@ -330,5 +342,3 @@ func main() {
 
 	wg.Wait()
 }
-
-// atom:set fileencoding=utf8 fileformat=unix filetype=go noexpandtab:
