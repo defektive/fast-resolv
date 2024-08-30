@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,7 @@ var (
 	maxAttempts   int
 	outputLock    sync.Mutex
 	versionFlag   bool
+	debugFlag     bool
 )
 
 func exists(path string) bool {
@@ -86,6 +88,7 @@ func init() {
 	flag.StringVar(&resolveConf, "r", defaultResolvConf, "path to a resolv.conf")
 	flag.StringVar(&domainsFile, "d", "domains.txt", "path to file with domains to lookup")
 	flag.BoolVar(&versionFlag, "v", false, "Display version information")
+	flag.BoolVar(&debugFlag, "debug", false, "Display debug information")
 }
 
 func lookupHost(domain string, attemptNumber int) (addrs []string, err error) {
@@ -204,13 +207,11 @@ func resolve(domainStr string) {
 		hosts, hostsErr := lookupAddr(domainStr, 1)
 		ch <- Result{domainStr, "", nil, nil, nil, "", hosts, nil, nil, nil, nil, hostsErr}
 	} else {
-		domain := domainCleanerRe.ReplaceAllString(domainStr, "$2")
-
-		addrs, addrErr := lookupHost(domain, 1)
-		txts, txtErr := lookupTxt(domain, 1)
-		mx, mxErr := lookupMX(domain, 1)
-		cName, cNameErr := lookupCName(domain, 1)
-		ch <- Result{domainStr, domain, addrs, txts, mx, cName, nil, addrErr, txtErr, mxErr, cNameErr, nil}
+		addrs, addrErr := lookupHost(domainStr, 1)
+		txts, txtErr := lookupTxt(domainStr, 1)
+		mx, mxErr := lookupMX(domainStr, 1)
+		cName, cNameErr := lookupCName(domainStr, 1)
+		ch <- Result{domainStr, domainStr, addrs, txts, mx, cName, nil, addrErr, txtErr, mxErr, cNameErr, nil}
 	}
 }
 
@@ -225,10 +226,7 @@ func resolveWorker(linkChan chan string, wg *sync.WaitGroup) {
 func syncPrintf(msg string, args ...interface{}) {
 	outputLock.Lock()
 	fmt.Printf(msg, args...)
-	err := os.Stdout.Sync()
-	if err != nil {
-		syncPrintf("!!!!! failed: sync err=%s\n", err)
-	}
+	_ = os.Stdout.Sync()
 	outputLock.Unlock()
 }
 
@@ -251,8 +249,15 @@ func getDomains() []string {
 
 	for scanner.Scan() {
 		domain := scanner.Text()
+		if ipMatch.MatchString(domain) {
+			domains = append(domains, domain)
+			continue
+		}
+
+		domain = domainCleanerRe.ReplaceAllString(domain, "$2")
 		if govalidator.IsDNSName(domain) {
 			domains = append(domains, domain)
+			continue
 		}
 	}
 
@@ -261,8 +266,8 @@ func getDomains() []string {
 	}
 
 	return domains
-
 }
+
 func main() {
 	flag.Parse()
 
@@ -271,17 +276,23 @@ func main() {
 		os.Exit(0)
 	}
 
+	if debugFlag {
+		fmt.Printf("[dbg] Getting domains\n")
+	}
+
 	unboundInstance.ResolvConf(resolveConf)
 	domains := getDomains()
+	domainCount := len(domains)
+
+	if debugFlag {
+		fmt.Printf("[dbg] resolving %d domains\n", domainCount)
+		fmt.Printf("[dbg] using %d workers\n", concurrency)
+	}
 
 	if len(domains) == 0 {
 		fmt.Println("[!] No Domains found")
 		return
 	}
-
-	//for _, domain := range domains {
-	//	fmt.Println(domain)
-	//}
 
 	tasks := make(chan string, concurrency)
 
@@ -302,26 +313,33 @@ func main() {
 		for {
 			select {
 			case result := <-ch:
+				output := []string{}
 				for _, ip := range result.addresses {
-					syncPrintf("%s has address %s\n", result.domain, ip)
+
+					output = append(output, fmt.Sprintf("%s has address %s\n", result.domain, ip))
 				}
 
 				for _, txt := range result.txt {
-					syncPrintf("%s has TXT %s\n", result.domain, txt)
+					output = append(output, fmt.Sprintf("%s has TXT %s\n", result.domain, txt))
 				}
 
 				for _, mx := range result.mx {
-					syncPrintf("%s has MX %s\n", result.domain, mx)
+					output = append(output, fmt.Sprintf("%s has MX %s\n", result.domain, mx))
 				}
 
 				for _, host := range result.hosts {
-					syncPrintf("%s domain name pointer %s\n", result.domain, host)
+					output = append(output, fmt.Sprintf("%s domain name pointer %s\n", result.domain, host))
 				}
 
 				if len(result.cName) > 0 {
-					syncPrintf("%s is an alias for %s\n", result.domain, result.cName)
+					output = append(output, fmt.Sprintf("%s is an alias for %s\n", result.domain, result.cName))
 				}
 
+				if debugFlag && len(output) == 0 {
+					output = append(output, fmt.Sprintf("[dbg] no results for %s\n", result.domain))
+				}
+
+				syncPrintf(strings.Join(output, ""))
 				i++
 				if i == numDomains {
 					break Loop
@@ -331,7 +349,7 @@ func main() {
 	}
 
 	wg.Add(1)
-	go receiver(len(domains))
+	go receiver(domainCount)
 
 	// Processing all links by spreading them to `free` goroutines
 	for _, domain := range domains {
