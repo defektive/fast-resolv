@@ -279,9 +279,9 @@ func main() {
 		return
 	}
 
-	for _, domain := range domains {
-		fmt.Println(domain)
-	}
+	//for _, domain := range domains {
+	//	fmt.Println(domain)
+	//}
 
 	tasks := make(chan string, concurrency)
 
